@@ -3,56 +3,19 @@ Data Science Project
 Data Gathering
 marrinetraffic.com 
 used the network tab in the inspect window to find where the website sends get request to the backend 
-found that it sends get request to https://www.marinetraffic.com/getData/get_data_json_4/z:3/X:2/Y:1/station:0
+found that it sends get request to https://www.marinetraffic.com/getData/get_data_json_4/z:0/X:0/Y:0/station:0
 therefore I sent it as well and got the json data 
 https://www.marinetraffic.com/getData/get_data_json_4/z:1/X:0/Y:0/station:0
-Here, the z, X and Y values when changed in the range of 0 to 3 give more data
-Each request gives up to 2.5 thousand entries. Combined scraping gets us XYZ amount
+After exploring a little bit, I found that z is the zoom value 
+when z = 0 we're zoomed out completely and only have x=0 y=0 value accessible (still 2.5k entries)
+so z=1 and permutating over x and y values with 00 01 10 and 11 values we have the 4 json files
+Each request gives up to 2.5 thousand entries. Combined scraping gets us around 10 thousand entries
+this is good enough data to analyze and hopefully do some machine learning on
 
 converted it to CSV using pandas using script.py
 
-Data Exploration
-firstly, the usage of AI to speed up the process of coding without worrying of syntax was a lot in this project
-in terms of data exploration, the first objective was to understand what each column meant and how they relate to each other 
-understanding the coverage of data in terms of how many NaN values vs valid values
-if it was possible to fill up NaN values using the other data 
-seeing which columns could be dropped that pose no significant value (feature engineering)
-
-=== COLUMN DEFINITIONS ===
-LAT          : Latitude - Geographic coordinate (North-South position)
-LON          : Longitude - Geographic coordinate (East-West position)
-SPEED        : Vessel speed in knots or other units
-COURSE       : Direction of travel in degrees (0-360°, where 0°=North)
-HEADING      : Direction vessel bow is pointing (may differ from course due to drift)
-ELAPSED      : Time elapsed since last update/ping
-DESTINATION  : Intended destination port or location
-FLAG         : Country flag/registration of the vessel
-LENGTH       : Overall length of vessel in meters
-SHIPNAME     : Name identifier of the vessel
-SHIPTYPE     : Numeric code for vessel type
-SHIP_ID      : Unique identifier for the vessel
-WIDTH        : Beam (width) of vessel in meters
-L_FORE       : Distance from GPS antenna to bow
-W_LEFT       : Distance from GPS antenna to port side
-DWT          : Deadweight Tonnage - cargo carrying capacity
-GT_SHIPTYPE  : Gross Tonnage ship type classification
-ROT          : Rate of Turn in degrees per minute
-TYPE_IMG     : Numeric code for vessel type image/icon
-TYPE_NAME    : Human-readable vessel type name
-STATUS_NAME  : Current operational status of vessel
-
-conclusions: 
-TYPE_IMG and TYPE_NAME were only 911 out of 2449
-they were both NaN or both existed, one wasn't present without the other
-therefore TYPE_IMG could be dropped
-SPEED could be determined if STATUS_NAME exists, if anchored speed is 0
-ROT (rate of turning) could be filled with 0 instead of NaN since most ships that aren't rotating if they're on the right course
-from latitude and longitude range we can find that the data covers ship information from argentinian sea and indian ocean below to north atlantic ocean and kara sea (using gps-coordinates.net)
-STATUS_NAME exists for 865 ships, TYPE_NAME exists for 879 ships
-the overlap is almost 100%, when STATUS_NAME exists TYPE_NAME also exists
-therefore we can't fill the NaN values logically and might have to drop some data
-
-optimistic outlook on opportunities (before analysis if it's really possible, ideas on what we can do with the data):
+Goals
+An optimistic outlook on opportunities (before analysis of if it's really possible, ideas on what we can do with the data):
 VIS
 -> port traffic analysis 
 -> heatmaps of vessel density and traffic patterns 
@@ -66,42 +29,114 @@ LAT LON SPEED COURSE
 SHIPTYPE STATUS_NAME TYPE_NAME
 Vessel Dimensions 
 
-Data Imputation (filling up NaN to make data more useful)
-AI Suggestions: 
-speed -> at "anchor / moored" speed = 0
 
-HEADING vs COURSE Deep Analysis
-discovered that heading (where ship bow points) and course (where ship actually moves) tell different stories
-analyzed 989 vessels with both data points
-- 51.5% have close alignment (≤5° difference) = ships moving efficiently in straight direction
-- 43.2% have large differences (>10°) = drift, maneuvering, or potential problems
+Data Exploration
+firstly, the usage of AI to speed up the process of coding without worrying of syntax was a lot in this project
+in terms of data exploration, the first objective was to understand what each column meant and how they relate to each other 
+understanding the coverage of data in terms of how many NaN values vs valid values
+if it was possible to fill up NaN values using the other data 
+seeing which columns could be dropped that pose no significant value (feature engineering)
+to explore we first use some general functions of pandas like .info .describe etc
+from this we understand a little about the expanse of ships around the maps
+latitude's range being -67 to 81 degrees (basically from antarctica to north, as low and as high as the ships can go)
+longitude's range from -179 to 179 (covers the map)
+both are perfect, cover the entire map, we can say we have scraped all the ship data of one particular moment in time
+Remark: the use of common sense and general knowledge is greatly helpful in data analytics
+if it's financial analysis of a business, knowing about that business would help!
 
-speed correlation is huge:
-- fast vessels (>10 knots): 82.1% have close H-C alignment (overpowering drift)
-- slow vessels (≤2 knots): only 7.0% alignment (getting pushed around by wind/current)
+An acute observation of speed is when I scraped in the morning the max speed was 1200 knots, and now it's 405 knots
+basically ships slow down at night because of the tides! 
 
-examples from data:
-- CAPE BYRON: H=232°, C=232° (perfect alignment, 88 knots - efficient movement)
-- SORION: H=90°, C=28° (62° difference, 1 knot - small boat drifting)
-- SEAHARMONY: H=222°, C=27° (165° difference, 0 knots - stationary vessel being pushed)
+ROT is just rate of turning, it can be filled up with 0 for ships with a lot of speed since they won't be turning at all 
+(they would be on course)
+SHIPTYPE and TYPE_IMG have a lot of similarities, maybe they indicate the same thing
+but SHIPTYPE has more coverage, if they're always equal, we can use SHIPTYPE to infer TYPE_NAME
+this will increase the coverage of the categorized column, helpful in classification problems
 
-vessel size impact (key insight):
-small ships get pushed around way more than large ships
-created danger scoring system with size multipliers:
-- small vessels (<50m): 2.0-2.5x multiplier 
-- large vessels (>150m): 1.0x multiplier
-- small vessels: 40% in critical danger vs large vessels: 0% critical danger
+SPEED's histogram gives a uniform distribution with two peaks, one around 0-20 range and the other at 120 range
+this means a lot of ships stationary are being counted, we have a diverse dataset without biases towards one type
+dropping the stationary ships with speed 0 and overlaying the graph on the prior histogram, my prediction was right
+the peak at 0-20 range got smaller but still exists, maybe they are yachts or something 
 
-most dangerous vessels all tiny boats (8-24m) with extreme H-C differences (139-177°)
-this makes sense - 1m fishing boat with 147° difference = serious problem
-200m cargo ship with same difference = probably just normal course correction
+Pleasure Craft have the highest record speeds of 405 knots
 
-imputation strategy:
-for missing HEADING can use COURSE ± small variation for fast-moving vessels
-1,318+ vessels could benefit from this
-both columns valuable, neither droppable
-H-C difference itself is valuable feature for anomaly detection and safety monitoring
+There's no correlation with boat length and speed, all three categories (<50m, 50-150m, >150m) have equivalent mean speeds
+however larger boats are generally 50 knots faster
 
-business applications:
-coast guard priority system, insurance risk assessment, port monitoring
-extreme differences (>90°) could flag vessels in distress/mechanical failure
+HEADING vs COURSE
+heading is where the front of ship points
+course is where the ship is moving towards
+can happen that ship is backwards moving due to waves (which is problematic)
+we can calculate max angular difference between them (very useful) (higher value = more out of alignment = problem) 
+for low / no speed the angular difference doesn't matter as much 
+for high speeds (10 - 1000) the distribution is normal except for outliers (0 25 50 and 75 are all < 5 but max is 180)
+this 180 outlier could be possible that satellite mistook the ship's head for its tail
+but higher angular differences for higher speeds = wind and waves are blowing ships away 
+plotting speed v/s length and marking the angle difference greater than 90 as red triangles
+we see that there's no true correlation between "danger" that we suspected and speed OR length
+all ships are subject to this "swaying" from the wind / waves therfore there's no valuable classification to be done 
+
+plotting ROT doesn't give any useful insight either, we just understand that there are a lot of ships that are currently 
+not rotating therfore we can replace the NaN values with 0 there (given HC_DIFF_ABS is < some logical threshold)
+and speed is > than some other threshold
+the reason is if the angular difference is greater, it means the ship is not on its course
+and if speed is less it means they're just "thinking" of course correction or something 
+ALTHOUGH to save computational costs if this data is being used in the real world, we can see through the ROT v/s speed plot
+that MOST of the NaN values for ROT are at high speeds or near 0 speeds. (ship has stopped / moving on correct course)
+both of which do not need rotation, therefore we can replace ALL NaN values with 0 to make it a usable feature in our dataset
+
+a simple linear regression can fit the width to length plot 
+
+some width values were 0 for some reason.
+TODO: find the reason why some width values were 0, they should've been NaN atleast? 
+
+key thing I'm doing is AI had given TYPE_NAME against the width but all entries that have TYPE_NAME don't have width... 
+Instead I'm using SHIPTYPE since it's ACTUALLY the same thing as we saw previously, therefore using the correlation between
+TYPE_IMG and TYPE_NAME given to us, and TYPE_IMG == SHIPTYPE, and SHIPTYPE having more coverage, we've converted SHIPTYPE
+into the categorical names that TYPE_NAME gave us.
+From SHIPTYPE v/s LW_RATIO we can see some really sweet correlations such as Fishing ships are longer, Cargo Vessels are more "chonky". 
+
+DWT (Deadweight Tonnage) v/s SHIPTYPE is kind of obvious
+
+Elapsed is kind of useless since we aren't doing any real time analysis
+
+Plotting the graph using Latitude and Longitude REALLY gives the feeling of working with marine data
+It sort of looks like the map of the world!
+
+speed v/s Geographic location! (also the range of color goes from 0-99.9% being 0 to 210)
+the reason is that even if max is 405, it's an outlier which shifts the color spectrum of graph too high 
+and most of fast ships are not that visible because the top one is TOO fast
+
+using seaborn to look at the confusion matrix of the correlation of the numerical elements with each other
+we see that heading and course relate, DWT and width, lenth have good relation, width and length also have good relation
+this is where we start to understand what can be used as features to make predictions
+
+Anomaly Detection Attempt (using z-scores)
+tried creating anomaly scores for SPEED, HC_DIFF, and ROT to find unusual behavior
+SPEED_ZSCORE worked okay, properly normalized with mean=0 std=1, max z-score was 5.83 (6 deviations away)
+but HC_DIFF was pretty useless as an anomaly indicator:
+-> mean is only 8.63 degrees
+-> 50% of ships have HC_DIFF = 0 (median = 0) 
+-> 75% have HC_DIFF ≤ 1 degree
+-> from earlier we saw that large HC_DIFF values were mostly legitimate anyway (ships turning, drifting from wind/waves)
+ROT_ZSCORE was even MORE useless:
+-> 50% of values are 0, 75% are STILL 0
+-> most ships just aren't turning at all if they're on course
+-> only 2744 out of 10141 ships even have ROT data (27% coverage)
+-> z-score is heavily skewed because of this
+
+anomaly scoring with z-scores didn't really work here
+HC_DIFF and ROT being zero or near-zero is just normal ship operation, not anomalies
+the distributions are too skewed for z-scores to capture meaningful deviations
+better to use domain-specific rules like "moving but anchored" or "stationary but underway" 
+those are ACTUAL operational anomalies, not just statistical outliers
+
+
+---
+
+Okay, from the goals we had decided, we did the visualization part of density and heatmap
+for ML, classification according to movement patterns is POSSIBLE, if we collectively use all other features wisely 
+to predict the SHIPTYPE, gotta explore that. 
+but anomaly and suspicious movement pattern is not possible since through analysing correlations between data, 
+we can see it's not that great
+
