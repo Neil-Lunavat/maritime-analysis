@@ -1,0 +1,107 @@
+Data Science Project 
+
+Data Gathering
+marrinetraffic.com 
+used the network tab in the inspect window to find where the website sends get request to the backend 
+found that it sends get request to https://www.marinetraffic.com/getData/get_data_json_4/z:3/X:2/Y:1/station:0
+therefore I sent it as well and got the json data 
+https://www.marinetraffic.com/getData/get_data_json_4/z:1/X:0/Y:0/station:0
+Here, the z, X and Y values when changed in the range of 0 to 3 give more data
+Each request gives up to 2.5 thousand entries. Combined scraping gets us XYZ amount
+
+converted it to CSV using pandas using script.py
+
+Data Exploration
+firstly, the usage of AI to speed up the process of coding without worrying of syntax was a lot in this project
+in terms of data exploration, the first objective was to understand what each column meant and how they relate to each other 
+understanding the coverage of data in terms of how many NaN values vs valid values
+if it was possible to fill up NaN values using the other data 
+seeing which columns could be dropped that pose no significant value (feature engineering)
+
+=== COLUMN DEFINITIONS ===
+LAT          : Latitude - Geographic coordinate (North-South position)
+LON          : Longitude - Geographic coordinate (East-West position)
+SPEED        : Vessel speed in knots or other units
+COURSE       : Direction of travel in degrees (0-360°, where 0°=North)
+HEADING      : Direction vessel bow is pointing (may differ from course due to drift)
+ELAPSED      : Time elapsed since last update/ping
+DESTINATION  : Intended destination port or location
+FLAG         : Country flag/registration of the vessel
+LENGTH       : Overall length of vessel in meters
+SHIPNAME     : Name identifier of the vessel
+SHIPTYPE     : Numeric code for vessel type
+SHIP_ID      : Unique identifier for the vessel
+WIDTH        : Beam (width) of vessel in meters
+L_FORE       : Distance from GPS antenna to bow
+W_LEFT       : Distance from GPS antenna to port side
+DWT          : Deadweight Tonnage - cargo carrying capacity
+GT_SHIPTYPE  : Gross Tonnage ship type classification
+ROT          : Rate of Turn in degrees per minute
+TYPE_IMG     : Numeric code for vessel type image/icon
+TYPE_NAME    : Human-readable vessel type name
+STATUS_NAME  : Current operational status of vessel
+
+conclusions: 
+TYPE_IMG and TYPE_NAME were only 911 out of 2449
+they were both NaN or both existed, one wasn't present without the other
+therefore TYPE_IMG could be dropped
+SPEED could be determined if STATUS_NAME exists, if anchored speed is 0
+ROT (rate of turning) could be filled with 0 instead of NaN since most ships that aren't rotating if they're on the right course
+from latitude and longitude range we can find that the data covers ship information from argentinian sea and indian ocean below to north atlantic ocean and kara sea (using gps-coordinates.net)
+STATUS_NAME exists for 865 ships, TYPE_NAME exists for 879 ships
+the overlap is almost 100%, when STATUS_NAME exists TYPE_NAME also exists
+therefore we can't fill the NaN values logically and might have to drop some data
+
+optimistic outlook on opportunities (before analysis if it's really possible, ideas on what we can do with the data):
+VIS
+-> port traffic analysis 
+-> heatmaps of vessel density and traffic patterns 
+ML
+-> Vessel Type Classification based on movement patterns
+-> Anomaly detection (unusual speed patterns, eg. cargo ship moving at 200 knots)
+-> Suspicious movement patterns (would require continuous data overtime)
+
+features that would help: 
+LAT LON SPEED COURSE 
+SHIPTYPE STATUS_NAME TYPE_NAME
+Vessel Dimensions 
+
+Data Imputation (filling up NaN to make data more useful)
+AI Suggestions: 
+speed -> at "anchor / moored" speed = 0
+
+HEADING vs COURSE Deep Analysis
+discovered that heading (where ship bow points) and course (where ship actually moves) tell different stories
+analyzed 989 vessels with both data points
+- 51.5% have close alignment (≤5° difference) = ships moving efficiently in straight direction
+- 43.2% have large differences (>10°) = drift, maneuvering, or potential problems
+
+speed correlation is huge:
+- fast vessels (>10 knots): 82.1% have close H-C alignment (overpowering drift)
+- slow vessels (≤2 knots): only 7.0% alignment (getting pushed around by wind/current)
+
+examples from data:
+- CAPE BYRON: H=232°, C=232° (perfect alignment, 88 knots - efficient movement)
+- SORION: H=90°, C=28° (62° difference, 1 knot - small boat drifting)
+- SEAHARMONY: H=222°, C=27° (165° difference, 0 knots - stationary vessel being pushed)
+
+vessel size impact (key insight):
+small ships get pushed around way more than large ships
+created danger scoring system with size multipliers:
+- small vessels (<50m): 2.0-2.5x multiplier 
+- large vessels (>150m): 1.0x multiplier
+- small vessels: 40% in critical danger vs large vessels: 0% critical danger
+
+most dangerous vessels all tiny boats (8-24m) with extreme H-C differences (139-177°)
+this makes sense - 1m fishing boat with 147° difference = serious problem
+200m cargo ship with same difference = probably just normal course correction
+
+imputation strategy:
+for missing HEADING can use COURSE ± small variation for fast-moving vessels
+1,318+ vessels could benefit from this
+both columns valuable, neither droppable
+H-C difference itself is valuable feature for anomaly detection and safety monitoring
+
+business applications:
+coast guard priority system, insurance risk assessment, port monitoring
+extreme differences (>90°) could flag vessels in distress/mechanical failure
