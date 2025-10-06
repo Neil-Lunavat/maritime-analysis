@@ -11,6 +11,8 @@ when z = 0 we're zoomed out completely and only have x=0 y=0 value accessible (s
 so z=1 and permutating over x and y values with 00 01 10 and 11 values we have the 4 json files
 Each request gives up to 2.5 thousand entries. Combined scraping gets us around 10 thousand entries
 this is good enough data to analyze and hopefully do some machine learning on
+unfortunately while trying to configure this script my IP got blocked. 
+
 
 converted it to CSV using pandas using script.py
 
@@ -140,3 +142,24 @@ to predict the SHIPTYPE, gotta explore that.
 but anomaly and suspicious movement pattern is not possible since through analysing correlations between data, 
 we can see it's not that great
 
+No. Instead of building a toy classification project which has no potential real world value. I can just end this Data Science project on the fact that I found some good insights, 
+
+The main problem is we only have ONE snapshot of ship data. One moment in time. Even if it's 10,000 ships, it's not so usable for anything. To get the real time data we would have to query the 
+
+BUT, I just figured out how to bypass the rate limit of the API calls
+Basically we can now have REAL TIME data of 10,000 ships. 
+THIS OPENS UP POSSIBILITY FOR A LOT OF THINGS
+
+There's one issue that we need to explore first, SHIP_ID is something that we can use to track a ship's data OVER TIME
+So if we scrape data from two instances over an hour, and based on how many SHIP_ID are common between the two datasets, we can infer if the data is convertible to a time series one. 
+This would take time. 
+
+data1 & data2: 1424
+data1 & data3: 1410
+data1 & data4: 1410
+data2 & data3: 2515
+data2 & data4: 2515
+data3 & data4: 9202
+
+from this output we can confidently say that around 1116 ships can be tracked over time, the rest are 
+it's like... in a 5 hour interval, we can see 8000 new ships and 
