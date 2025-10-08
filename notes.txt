@@ -13,7 +13,6 @@ Each request gives up to 2.5 thousand entries. Combined scraping gets us around 
 this is good enough data to analyze and hopefully do some machine learning on
 unfortunately while trying to configure this script my IP got blocked. 
 
-
 converted it to CSV using pandas using script.py
 
 Goals
@@ -161,5 +160,70 @@ data2 & data3: 2515
 data2 & data4: 2515
 data3 & data4: 9202
 
-from this output we can confidently say that around 1116 ships can be tracked over time, the rest are 
-it's like... in a 5 hour interval, we can see 8000 new ships and 
+After two days of scraping now we have over 6 different moments of time and after using AI to do the analysis faster on those which I haven't gone over particularly because it would take a lot more time I used claude sonnet 4.5 To read the output of those cells and then give me an analysis on what exactly we can do with the data and how we can create some sort of machine learning application on it with the end goal in mind Of creating a dashboard that displays multiple things such as detecting ships that are behaving erratically, Flagging potential smuggling, Detecting drift and distress. We can also automatically discover ports, Track port congestion through the number of ships that are clustered, Detect dark zones. 
+
+Now the main thing is trying to find ideas on what we can do that deploy right now and then automatically get better over time as more and more data is scraped and stored till a month's has been gather to train on and then it's a matter of optimization. 
+
+There was a slight issue with script.py, because it wasn't headless we couldn't run it on VPS, but now I fixed it, just had to add some parameters and user-agent and whatever (AI did it). 
+
+The idea has started to form!
+We will create a full stack website with backend being a complete ML pipeline from data scraping to preprocessing to prediction and classification to storage to api endpoint to frontend to display on dashboard. 
+We are gonna create the craziest frontend dashboard with all ships, their type etc metadata that's directly scraped + we will display the historical trajectories and whatnot. 
+
+Now comes the cool but HARD part.
+I need to learn about machine learning algorithms that we would implement specifically to be adaptive with more data. The aim is to have a 30 day rolling data where we will scrape every day 24 times and will have 720 "snapshots" per month, and we would only apply our algorithms on the entire month. As in on day 31 we would drop day 1. 
+
+the backend is scrape -> restructure -> store -> perform predictions -> store -> rest api -> frontend -> displayed as a 3d globe with ships on the map, clickable n stuff, filters to see only anomaly or only ports (congestion data) or illegal stuff or ship in danger or click ship to see it's timeline throughout last 30 days 
+
+the algorithms may or maynot depending on how much computation is needed run in the same time or take run every 24 hours, only the 24 hour snapshot will be displayed on the frontend, i.e. our frontend would not display real time, it would display the last run ML pipeline's predictions. We'll see how it plays out in the scalability thing. But basically at max level we are going to play with 10 million entries of data. 
+
+the ML algorithms that we would apply in order to do all sorts of predictions and classifications, they would be deployable NOW but would get better as more and more data is scraped and stored in our database. 
+
+In total we would be playing with around 10 million entries of data when this is deployed and at max. 
+
+I will actually just paste the entire AI's response for my question asking a list of all the concepts that I need to learn in order to understand everything to be able to implement the entire project. Now, conceptually I WILL try to understand every single thing but to ship in a week I would still be using abstract libraries that would do the code for me. I hope for a XGBoost algorithm to just be imported from some library sklearn or something and I do XGBoost.train(data) and tune hyperparameters with my understanding. That is enough I think. 
+
+# ALGORITHMS
+DBSCAN 
+K-Means Clustering
+HDBSCAN
+Isolation Forest
+One-Class SVM
+LOF
+Statistical Methods (these are like, using metadata to calculate specific features that you find the "top 10" or something of or evaluate against a threshold and that would detect on its own, not that crazy but if it WORKS then it will reduce computations immensely and that is KEY in MLOps, always start with small blocks)
+LSTM
+GRU
+XGBoost
+Time Series Fundamentals (sliding window, train validation test split for time series, autocorrelation)
+
+The Fundamentals is very important to understand the bigger picture of what we're playing with here. 
+
+Haversine Distance Formula
+Circular Statistics
+Rolling window Statistics
+Lag features
+
+Model Evaluation -> unsupervised learning metrics, anomaly detection metrics 
+
+--- 
+
+THE BIGGEST insight I've gotten of feature engineering is FIRST recognizing the limitations of data that is just a snapshot in time, there is not much to be done. Next thing is we gather time series data so that we can measure behaviour over time. Whilst reading how we are going to do that I came across this 
+
+# Create features for ML
+def calculate_features(ship_history):
+    df['SPEED_CHANGE'] = df.groupby('SHIP_ID')['SPEED'].diff()
+    df['COURSE_STD'] = df.groupby('SHIP_ID')['COURSE'].rolling(6).std()
+    df['DISTANCE_TRAVELED'] = haversine(df['LAT'].shift(), df['LON'].shift(),
+                                         df['LAT'], df['LON'])
+    df['TIME_STATIONARY'] = (df['SPEED'] < 2).groupby('SHIP_ID').cumsum()
+
+BASICALLY Raw data (lat/lon/speed) isn't enough for ML
+Derived features = capture behavior patterns
+COURSE_STD = how erratic the ship is (key for anomalies)
+
+More importantly, we are now UTILIZING THE TIME DATA IN ORDER TO CREATE DATA THAT GIVES THE NEW INSIGHT THAT's "OVERTIME"
+
+So that's how we turn the static moments in time data and engineer features across time that are USEFUL.
+
+Okay, the biggest problem I'm currently facing is that my debit card is prepaid and to claim the 200$ of digital ocean credits to deploy this on a server is kinda... takes a credit card. Which means... till that's sorted we can't really deploy a script or anything. 
+BUT let's control what we have, I'm going to try and build everything in a docker container offline, hopefully will be able to deploy it, otherwise eh whatever. 
