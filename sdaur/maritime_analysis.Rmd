@@ -1,0 +1,657 @@
+---
+title: "Marine Traffic Data Analysis"
+author: "Statistical Data Analytics - R Project"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
+```
+
+## Setup & Libraries
+
+```{r}
+library(tidyverse)
+library(readr)
+library(corrplot)
+library(ggcorrplot)
+library(scales)
+library(gridExtra)
+```
+
+## Data Loading
+
+```{r}
+df <- read_csv('20251014_135840.csv')
+head(df)
+```
+
+## Initial Exploration
+
+```{r}
+dim(df)
+str(df)
+summary(df)
+```
+
+## Missing Values Analysis
+
+```{r}
+colSums(is.na(df))
+(colSums(is.na(df)) / nrow(df)) * 100
+```
+
+```{r}
+summary(df)
+```
+
+## Categorical Variables
+
+```{r}
+table(df$SHIPTYPE)
+table(df$TYPE_NAME)
+table(df$STATUS_NAME)
+table(df$FLAG)
+```
+
+## Data Preprocessing - TYPE_NAME Mapping
+
+```{r}
+comparison <- df %>% filter(!is.na(TYPE_IMG))
+all(comparison$TYPE_IMG == comparison$SHIPTYPE)
+comparison %>%
+  filter(!is.na(TYPE_NAME)) %>%
+  group_by(TYPE_IMG) %>%
+  summarize(TYPE_NAME = first(TYPE_NAME)) %>%
+  arrange(TYPE_IMG)
+```
+
+```{r}
+type_mapping <- df %>%
+  filter(!is.na(SHIPTYPE) & !is.na(TYPE_NAME)) %>%
+  group_by(SHIPTYPE) %>%
+  summarize(TYPE_NAME = first(TYPE_NAME))
+df <- df %>%
+  left_join(type_mapping %>% rename(TYPE_NAME_NEW = TYPE_NAME), by = "SHIPTYPE") %>%
+  mutate(TYPE_NAME = ifelse(is.na(TYPE_NAME), TYPE_NAME_NEW, TYPE_NAME)) %>%
+  select(-TYPE_NAME_NEW)
+table(df$TYPE_NAME)
+```
+
+## Column Transformations
+
+```{r}
+df <- df %>% select(-SHIPTYPE, -TYPE_IMG)
+df <- df %>% rename(SHIPTYPE = TYPE_NAME)
+head(df)
+```
+
+## Speed Distribution
+
+```{r}
+hist(df$SPEED, breaks=50, main="Speed Distribution", xlab="Speed (knots)")
+hist(df$SPEED[df$SPEED > 0], breaks=50, main="Speed Distribution (Speed > 0)",
+     xlab="Speed (knots)", col=rgb(1,0,0,0.5), add=FALSE)
+```
+
+```{r}
+df %>%
+  filter(SPEED > quantile(SPEED, 0.99, na.rm=TRUE)) %>%
+  select(SHIPNAME, SPEED, SHIPTYPE, LENGTH)
+```
+
+## Speed by Status
+
+```{r}
+df %>%
+  group_by(STATUS_NAME) %>%
+  summarize(
+    count = n(),
+    mean = mean(SPEED, na.rm=TRUE),
+    sd = sd(SPEED, na.rm=TRUE),
+    min = min(SPEED, na.rm=TRUE),
+    q25 = quantile(SPEED, 0.25, na.rm=TRUE),
+    median = median(SPEED, na.rm=TRUE),
+    q75 = quantile(SPEED, 0.75, na.rm=TRUE),
+    max = max(SPEED, na.rm=TRUE)
+  )
+```
+
+```{r}
+table(df$STATUS_NAME)
+```
+
+```{r}
+df %>%
+  filter(STATUS_NAME %in% c('At Anchor', 'Moored')) %>%
+  pull(SPEED) %>%
+  summary()
+```
+
+## Speed by Ship Type
+
+```{r}
+df %>%
+  group_by(SHIPTYPE) %>%
+  summarize(
+    count = n(),
+    mean = mean(SPEED, na.rm=TRUE),
+    sd = sd(SPEED, na.rm=TRUE),
+    min = min(SPEED, na.rm=TRUE),
+    median = median(SPEED, na.rm=TRUE),
+    max = max(SPEED, na.rm=TRUE)
+  )
+```
+
+## Speed by Length
+
+```{r}
+df %>%
+  filter(!is.na(LENGTH)) %>%
+  mutate(LENGTH_BIN = cut(LENGTH, breaks=c(0, 50, 150, 500))) %>%
+  group_by(LENGTH_BIN) %>%
+  summarize(
+    count = n(),
+    mean = mean(SPEED, na.rm=TRUE),
+    sd = sd(SPEED, na.rm=TRUE),
+    min = min(SPEED, na.rm=TRUE),
+    median = median(SPEED, na.rm=TRUE),
+    max = max(SPEED, na.rm=TRUE)
+  )
+```
+
+## Heading-Course Analysis
+
+```{r}
+table(!is.na(df$HEADING), !is.na(df$COURSE))
+```
+
+## Feature Engineering - HC_DIFF
+
+```{r}
+both <- df %>%
+  filter(!is.na(HEADING) & !is.na(COURSE))
+
+both <- both %>%
+  mutate(
+    HC_DIFF = ifelse(
+      abs(HEADING - COURSE) <= 180,
+      HEADING - COURSE,
+      ifelse(
+        HEADING - COURSE > 180,
+        HEADING - COURSE - 360,
+        HEADING - COURSE + 360
+      )
+    ),
+    HC_DIFF_ABS = abs(HC_DIFF)
+  )
+```
+
+```{r}
+hist(both$HC_DIFF_ABS, breaks=50, main="Heading-Course Difference Distribution",
+     xlab="HC_DIFF_ABS (degrees)")
+summary(both$HC_DIFF_ABS)
+```
+
+## HC_DIFF by Speed
+
+```{r}
+both %>%
+  filter(!is.na(SPEED)) %>%
+  mutate(SPEED_BIN = cut(SPEED, breaks=c(-1, 2, 5, 10, 1000))) %>%
+  group_by(SPEED_BIN) %>%
+  summarize(
+    count = n(),
+    mean = mean(HC_DIFF_ABS, na.rm=TRUE),
+    sd = sd(HC_DIFF_ABS, na.rm=TRUE),
+    min = min(HC_DIFF_ABS, na.rm=TRUE),
+    median = median(HC_DIFF_ABS, na.rm=TRUE),
+    max = max(HC_DIFF_ABS, na.rm=TRUE)
+  )
+```
+
+## HC_DIFF by Length
+
+```{r}
+both %>%
+  filter(!is.na(LENGTH)) %>%
+  mutate(LENGTH_BIN = cut(LENGTH, breaks=c(0, 50, 150, 500))) %>%
+  group_by(LENGTH_BIN) %>%
+  summarize(
+    count = n(),
+    mean = mean(HC_DIFF_ABS, na.rm=TRUE),
+    sd = sd(HC_DIFF_ABS, na.rm=TRUE),
+    min = min(HC_DIFF_ABS, na.rm=TRUE),
+    median = median(HC_DIFF_ABS, na.rm=TRUE),
+    max = max(HC_DIFF_ABS, na.rm=TRUE)
+  )
+```
+
+## Anomaly Detection - HC_DIFF
+
+```{r}
+threshold <- 90
+normal <- both %>% filter(HC_DIFF_ABS <= threshold)
+anomalous <- both %>% filter(HC_DIFF_ABS > threshold & SPEED > 10)
+
+ggplot() +
+  geom_point(data=normal, aes(x=LENGTH, y=SPEED), alpha=0.6, color='blue', size=2) +
+  geom_point(data=anomalous, aes(x=LENGTH, y=SPEED), alpha=0.8, color='red',
+             size=3, shape=17) +
+  labs(x="LENGTH (meters)", y="SPEED (knots)",
+       title="Ship Length vs Speed with Heading-Course Difference Anomalies") +
+  theme_minimal() +
+  theme(panel.grid = element_line())
+
+cat("Number of anomalous points (HC_DIFF_ABS > 90 & SPEED > 10):", nrow(anomalous), "\n")
+```
+
+```{r}
+both %>%
+  filter(HC_DIFF_ABS > 90) %>%
+  select(SHIPNAME, HEADING, COURSE, HC_DIFF_ABS, SPEED, LENGTH, SHIPTYPE) %>%
+  arrange(desc(HC_DIFF_ABS))
+```
+
+## Rate of Turn (ROT) Distribution
+
+```{r}
+hist(df$ROT, breaks=50, main="Rate of Turn Distribution", xlab="ROT")
+summary(df$ROT)
+sum(df$ROT == 0, na.rm=TRUE) / sum(!is.na(df$ROT))
+```
+
+## ROT vs Speed
+
+```{r}
+df %>%
+  filter(!is.na(ROT) & !is.na(SPEED)) %>%
+  ggplot(aes(x=SPEED, y=ROT)) +
+  geom_point(alpha=0.1) +
+  theme_minimal()
+```
+
+```{r}
+df %>%
+  filter(!is.na(ROT)) %>%
+  mutate(SPEED_BIN = cut(SPEED, breaks=c(-1, 2, 5, 10, 1000))) %>%
+  group_by(SPEED_BIN) %>%
+  summarize(
+    count = n(),
+    mean = mean(ROT, na.rm=TRUE),
+    sd = sd(ROT, na.rm=TRUE),
+    min = min(ROT, na.rm=TRUE),
+    median = median(ROT, na.rm=TRUE),
+    max = max(ROT, na.rm=TRUE)
+  )
+```
+
+## ROT Outliers
+
+```{r}
+df %>%
+  filter(abs(ROT) > quantile(abs(ROT), 0.99, na.rm=TRUE)) %>%
+  select(SHIPNAME, ROT, SPEED, LENGTH, SHIPTYPE) %>%
+  arrange(desc(abs(ROT)))
+```
+
+## Length vs Width
+
+```{r}
+df %>%
+  filter(!is.na(LENGTH) & !is.na(WIDTH)) %>%
+  ggplot(aes(x=LENGTH, y=WIDTH)) +
+  geom_point(alpha=0.3) +
+  theme_minimal()
+```
+
+```{r}
+df %>%
+  filter(!is.na(LENGTH) & !is.na(WIDTH)) %>%
+  select(LENGTH, WIDTH) %>%
+  cor()
+```
+
+## Feature Engineering - LW_RATIO
+
+```{r}
+valid_lw <- df %>%
+  filter(!is.na(LENGTH) & !is.na(WIDTH) & WIDTH > 0) %>%
+  mutate(LW_RATIO = LENGTH / WIDTH)
+
+df <- df %>%
+  left_join(valid_lw %>% select(SHIP_ID, LW_RATIO), by = "SHIP_ID")
+```
+
+```{r}
+hist(df$LW_RATIO, breaks=50, main="Length-Width Ratio Distribution", xlab="LW_RATIO")
+summary(df$LW_RATIO)
+```
+
+## LW_RATIO by Ship Type
+
+```{r}
+df %>%
+  group_by(SHIPTYPE) %>%
+  summarize(
+    count = n(),
+    mean = mean(LW_RATIO, na.rm=TRUE),
+    sd = sd(LW_RATIO, na.rm=TRUE),
+    min = min(LW_RATIO, na.rm=TRUE),
+    median = median(LW_RATIO, na.rm=TRUE),
+    max = max(LW_RATIO, na.rm=TRUE)
+  )
+```
+
+## LW_RATIO Outliers
+
+```{r}
+df %>%
+  filter(LW_RATIO > quantile(LW_RATIO, 0.997, na.rm=TRUE)) %>%
+  select(SHIPNAME, LENGTH, WIDTH, LW_RATIO, SHIPTYPE) %>%
+  arrange(desc(LW_RATIO))
+```
+
+```{r}
+df %>%
+  filter(LW_RATIO < quantile(LW_RATIO, 0.003, na.rm=TRUE)) %>%
+  select(SHIPNAME, LENGTH, WIDTH, LW_RATIO, SHIPTYPE) %>%
+  arrange(LW_RATIO)
+```
+
+## DWT by Ship Type
+
+```{r}
+df %>%
+  group_by(SHIPTYPE) %>%
+  summarize(
+    count = n(),
+    mean = mean(DWT, na.rm=TRUE),
+    sd = sd(DWT, na.rm=TRUE),
+    min = min(DWT, na.rm=TRUE),
+    median = median(DWT, na.rm=TRUE),
+    max = max(DWT, na.rm=TRUE)
+  )
+```
+
+```{r}
+df %>%
+  filter(DWT > 0) %>%
+  group_by(SHIPTYPE) %>%
+  summarize(
+    count = n(),
+    mean = mean(DWT, na.rm=TRUE),
+    sd = sd(DWT, na.rm=TRUE),
+    min = min(DWT, na.rm=TRUE),
+    median = median(DWT, na.rm=TRUE),
+    max = max(DWT, na.rm=TRUE)
+  )
+```
+
+## DWT vs Length
+
+```{r}
+df %>%
+  filter(!is.na(DWT) & !is.na(LENGTH) & !is.na(SHIPTYPE)) %>%
+  ggplot(aes(x=LENGTH, y=DWT, color=SHIPTYPE)) +
+  geom_point(alpha=0.6, size=2) +
+  labs(x="LENGTH (meters)", y="DWT (tonnes)",
+       title="Ship Length vs DWT by Ship Type") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        panel.grid = element_line())
+```
+
+```{r}
+df %>%
+  select(DWT, LENGTH) %>%
+  cor(use="complete.obs")
+```
+
+## Drop ELAPSED Column
+
+```{r}
+df <- df %>% select(-ELAPSED)
+```
+
+## Geographic Distribution
+
+```{r}
+df %>%
+  ggplot(aes(x=LON, y=LAT)) +
+  geom_point(alpha=0.1) +
+  labs(x="Longitude", y="Latitude",
+       title="Geographic Distribution of Ships") +
+  theme_minimal()
+```
+
+```{r}
+df %>%
+  select(LAT, LON) %>%
+  summary()
+```
+
+## Speed by Geographic Location
+
+```{r}
+df %>%
+  filter(!is.na(SPEED)) %>%
+  ggplot(aes(x=LON, y=LAT, color=SPEED)) +
+  geom_point(alpha=0.3) +
+  scale_color_viridis_c(option="plasma",
+                        limits=c(0, quantile(df$SPEED, 0.999, na.rm=TRUE))) +
+  labs(x="Longitude", y="Latitude",
+       title="Ship Speed by Geographic Location") +
+  theme_minimal()
+```
+
+## Correlation Matrix
+
+```{r}
+numeric_cols <- c('LAT', 'LON', 'SPEED', 'COURSE', 'HEADING', 'LENGTH',
+                  'WIDTH', 'DWT', 'ROT', 'LW_RATIO')
+corr_matrix <- df %>%
+  select(all_of(numeric_cols)) %>%
+  cor(use="complete.obs")
+
+ggcorrplot(corr_matrix, hc.order=FALSE, type="full", lab=TRUE,
+           lab_size=3, colors=c("#6D9EC1", "white", "#E46726"),
+           title="Correlation Matrix of Numerical Features")
+
+corr_matrix
+```
+
+## Simple Linear Regression - Model Fitting
+
+```{r}
+lm_data <- df %>%
+  filter(!is.na(LENGTH) & !is.na(WIDTH) & WIDTH > 0)
+
+model <- lm(WIDTH ~ LENGTH, data=lm_data)
+summary(model)
+```
+
+## Regression Visualization
+
+```{r}
+ggplot(lm_data, aes(x=LENGTH, y=WIDTH)) +
+  geom_point(alpha=0.3, color='steelblue') +
+  geom_smooth(method='lm', color='red', se=TRUE, linewidth=1.2) +
+  labs(x="LENGTH (meters)", y="WIDTH (meters)",
+       title="Simple Linear Regression: WIDTH ~ LENGTH",
+       subtitle=paste0("R² = ", round(summary(model)$r.squared, 4),
+                      ", p-value < 2.2e-16")) +
+  theme_minimal() +
+  theme(plot.subtitle = element_text(size=10, color="gray30"))
+```
+
+## Regression Diagnostics
+
+```{r}
+par(mfrow=c(2,2))
+plot(model)
+par(mfrow=c(1,1))
+```
+
+## Confidence Intervals
+
+```{r}
+conf_intervals <- confint(model)
+conf_intervals
+```
+
+## Regression by Ship Type
+
+```{r}
+ggplot(lm_data, aes(x=LENGTH, y=WIDTH, color=SHIPTYPE)) +
+  geom_point(alpha=0.6, size=2) +
+  geom_smooth(method='lm', color='black', se=FALSE, linewidth=1, linetype='dashed') +
+  labs(x="LENGTH (meters)", y="WIDTH (meters)",
+       title="LENGTH vs WIDTH by Ship Type with Linear Regression",
+       subtitle="Color-coded by vessel type") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+## Enhanced Visualization - Ship Types
+
+```{r}
+lm_data_with_type <- lm_data %>%
+  filter(!is.na(SHIPTYPE))
+
+ggplot(lm_data_with_type, aes(x=LENGTH, y=WIDTH)) +
+  geom_point(aes(color=SHIPTYPE), alpha=0.6, size=2.5) +
+  geom_smooth(method='lm', color='black', se=TRUE, linewidth=1.2, alpha=0.2) +
+  scale_color_brewer(palette="Set3") +
+  labs(x="LENGTH (meters)", y="WIDTH (meters)",
+       title="Ship Dimensions by Vessel Type",
+       subtitle=paste0("Linear fit: WIDTH = ", round(coef(model)[1], 2),
+                      " + ", round(coef(model)[2], 4), " × LENGTH"),
+       color="Vessel Type") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical",
+    plot.title = element_text(size=14, face="bold"),
+    plot.subtitle = element_text(size=10, color="gray30")
+  ) +
+  guides(color = guide_legend(nrow=2))
+```
+
+## Ship Type Summary Statistics
+
+```{r}
+shiptype_summary <- lm_data_with_type %>%
+  group_by(SHIPTYPE) %>%
+  summarize(
+    count = n(),
+    mean_length = mean(LENGTH, na.rm=TRUE),
+    mean_width = mean(WIDTH, na.rm=TRUE),
+    mean_lw_ratio = mean(LENGTH/WIDTH, na.rm=TRUE)
+  ) %>%
+  arrange(desc(count))
+
+print(shiptype_summary)
+```
+
+## Highlighting Key Vessel Types
+
+```{r}
+cargo_ships <- lm_data_with_type %>% filter(SHIPTYPE == "Cargo Vessel")
+pleasure_crafts <- lm_data_with_type %>% filter(SHIPTYPE == "Pleasure Craft")
+tankers <- lm_data_with_type %>% filter(SHIPTYPE == "Tanker")
+
+ggplot(lm_data_with_type, aes(x=LENGTH, y=WIDTH)) +
+  geom_point(data=lm_data_with_type, aes(color=SHIPTYPE), alpha=0.3, size=1.5) +
+  geom_point(data=cargo_ships, aes(color=SHIPTYPE), alpha=0.8, size=3) +
+  geom_point(data=pleasure_crafts, aes(color=SHIPTYPE), alpha=0.8, size=3) +
+  geom_point(data=tankers, aes(color=SHIPTYPE), alpha=0.8, size=3) +
+  geom_smooth(method='lm', color='black', se=TRUE, linewidth=1.2) +
+  labs(x="LENGTH (meters)", y="WIDTH (meters)",
+       title="Ship Dimensions: Highlighting Key Vessel Types",
+       subtitle="Cargo Vessels, Pleasure Crafts, and Tankers emphasized",
+       color="Vessel Type") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+## Boxplots - Dimensions by Ship Type
+
+```{r}
+p1 <- ggplot(lm_data_with_type, aes(x=SHIPTYPE, y=LENGTH, fill=SHIPTYPE)) +
+  geom_boxplot(alpha=0.7) +
+  coord_flip() +
+  labs(x="", y="LENGTH (meters)", title="Length Distribution by Ship Type") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+p2 <- ggplot(lm_data_with_type, aes(x=SHIPTYPE, y=WIDTH, fill=SHIPTYPE)) +
+  geom_boxplot(alpha=0.7) +
+  coord_flip() +
+  labs(x="", y="WIDTH (meters)", title="Width Distribution by Ship Type") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+grid.arrange(p1, p2, ncol=1)
+```
+
+## Residual Analysis by Ship Type
+
+```{r}
+residuals_df <- data.frame(
+  fitted = fitted(model),
+  residuals = residuals(model),
+  shiptype = lm_data$SHIPTYPE
+)
+
+ggplot(residuals_df, aes(x=fitted, y=residuals, color=shiptype)) +
+  geom_point(alpha=0.6) +
+  geom_hline(yintercept=0, linetype="dashed", color="red") +
+  labs(x="Fitted Values", y="Residuals",
+       title="Residual Plot by Ship Type",
+       color="Vessel Type") +
+  theme_minimal()
+```
+
+## 3D Visualization - Speed Encoding
+
+```{r}
+lm_data_3d <- lm_data %>%
+  filter(!is.na(SPEED) & !is.na(SHIPTYPE))
+
+ggplot(lm_data_3d, aes(x=LENGTH, y=WIDTH)) +
+  geom_point(aes(color=SHIPTYPE, size=SPEED), alpha=0.6) +
+  geom_smooth(method='lm', color='black', se=FALSE, linewidth=1) +
+  scale_size_continuous(range=c(1, 8)) +
+  labs(x="LENGTH (meters)", y="WIDTH (meters)",
+       title="Ship Dimensions with Speed Encoding",
+       subtitle="Point size represents vessel speed",
+       color="Vessel Type", size="Speed (knots)") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+## Density Plot with Ship Types
+
+```{r}
+lm_data_density <- lm_data_with_type %>%
+  filter(!is.na(LENGTH) & !is.na(WIDTH))
+
+ggplot(lm_data_density, aes(x=LENGTH, y=WIDTH)) +
+  stat_density_2d(aes(fill=after_stat(level)), geom="polygon", alpha=0.3) +
+  geom_point(aes(color=SHIPTYPE), alpha=0.6, size=2) +
+  geom_smooth(method='lm', color='black', se=TRUE, linewidth=1.2) +
+  scale_fill_gradient(low="lightblue", high="darkblue") +
+  labs(x="LENGTH (meters)", y="WIDTH (meters)",
+       title="Ship Dimensions Density Plot with Vessel Types",
+       subtitle="Density contours show concentration of ships",
+       color="Vessel Type", fill="Density") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```

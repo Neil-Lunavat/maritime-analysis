@@ -1,0 +1,423 @@
+graph TB
+    subgraph "🌐 EXTERNAL WORLD"
+        MT[MarineTraffic.com<br/>Ship Data Source]
+        USER[User's Browser]
+    end
+
+    subgraph "☁️ DIGITAL OCEAN DROPLET (Your VPS Server)"
+        
+        subgraph "🐳 Docker Container 1: SCRAPER"
+            SCRAPER[scraper.py<br/>---<br/>Selenium headless<br/>Runs every 1 hour]
+            SCHEDULER1[APScheduler<br/>---<br/>Triggers scraper.py<br/>every hour]
+        end
+
+        subgraph "🐳 Docker Container 2: DATABASE"
+            DB[(PostgreSQL<br/>---<br/>Tables:<br/>- ships_current<br/>- ships_historical<br/>- ports_discovered<br/>- anomalies<br/>- predictions)]
+        end
+
+        subgraph "🐳 Docker Container 3: ML PIPELINE"
+            MLSCHED[APScheduler<br/>---<br/>Daily: 12:00 AM]
+            
+            ML1[port_clustering.py<br/>---<br/>DBSCAN algorithm<br/>Discovers ports]
+            ML2[anomaly_detection.py<br/>---<br/>Isolation Forest<br/>Flags weird ships]
+            ML3[trajectory_prediction.py<br/>---<br/>LSTM model<br/>Predicts routes]
+            
+            MLSCHED -->|Triggers| ML1
+            ML1 -->|Then runs| ML2
+            ML2 -->|Then runs| ML3
+        end
+
+        subgraph "🐳 Docker Container 4: API SERVER"
+            API[main.py<br/>FastAPI<br/>---<br/>REST Endpoints:<br/>GET /api/ships/current<br/>GET /api/ships/:id/history<br/>GET /api/ports<br/>GET /api/anomalies<br/>GET /api/predictions/:id]
+        end
+
+        subgraph "🐳 Docker Container 5: FRONTEND"
+            NEXT[Next.js App<br/>---<br/>3D Globe Mapbox<br/>Dashboard<br/>Charts]
+        end
+
+        NGINX[Nginx Reverse Proxy<br/>---<br/>Routes traffic:<br/>/ → Frontend<br/>/api → Backend]
+    end
+
+    %% Data Flow
+    MT -->|HTTP GET| SCRAPER
+    SCRAPER -->|INSERT INTO<br/>ships_current,<br/>ships_historical| DB
+    
+    DB -->|READ data| ML1
+    ML1 -->|WRITE TO<br/>ports_discovered| DB
+    ML2 -->|READ ships_historical| DB
+    ML2 -->|WRITE TO<br/>anomalies| DB
+    ML3 -->|READ ships_historical| DB
+    ML3 -->|WRITE TO<br/>predictions| DB
+    
+    DB -->|SQL queries| API
+    
+    API -->|JSON response| NGINX
+    NEXT -->|HTTP request| NGINX
+    
+    USER -->|HTTPS<br/>maritimeintel.me| NGINX
+    NGINX -->|HTML/JS/CSS| USER
+
+    classDef scraper fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef db fill:#4dabf7,stroke:#1971c2,color:#fff
+    classDef ml fill:#51cf66,stroke:#2f9e44,color:#fff
+    classDef api fill:#ffd43b,stroke:#f08c00,color:#000
+    classDef frontend fill:#845ef7,stroke:#5f3dc4,color:#fff
+    classDef external fill:#868e96,stroke:#495057,color:#fff
+    
+    class SCRAPER,SCHEDULER1 scraper
+    class DB db
+    class ML1,ML2,ML3,MLSCHED ml
+    class API api
+    class NEXT,NGINX frontend
+    class MT,USER external
+
+    maritime-intelligence/
+│
+├── 📁 backend/                          # ← ALL Python code here
+│   ├── 📄 Dockerfile                    # Docker setup for backend
+│   ├── 📄 requirements.txt              # Python dependencies
+│   │
+│   ├── 📁 scraper/                      # ← SCRAPER (Container 1)
+│   │   ├── 📄 scraper.py                # Selenium script (scrapes MarineTraffic)
+│   │   ├── 📄 scheduler.py              # APScheduler (runs scraper every hour)
+│   │   └── 📄 db_writer.py              # Writes scraped data to PostgreSQL
+│   │
+│   ├── 📁 ml/                           # ← ML PIPELINE (Container 3)
+│   │   ├── 📄 ml_scheduler.py           # APScheduler (runs ML daily at midnight)
+│   │   ├── 📄 port_clustering.py        # DBSCAN algorithm
+│   │   ├── 📄 anomaly_detection.py      # Isolation Forest
+│   │   ├── 📄 trajectory_prediction.py  # LSTM model
+│   │   ├── 📄 feature_engineering.py    # Calculate COURSE_STD, HC_DIFF, etc.
+│   │   └── 📁 models/                   # Saved ML models
+│   │       ├── lstm_model.h5            # Trained LSTM
+│   │       └── isolation_forest.pkl     # Trained Isolation Forest
+│   │
+│   ├── 📁 api/                          # ← REST API (Container 4)
+│   │   ├── 📄 main.py                   # FastAPI app (entry point)
+│   │   ├── 📄 routes.py                 # API endpoints (/api/ships, /api/ports...)
+│   │   ├── 📄 models.py                 # Pydantic models (request/response schemas)
+│   │   └── 📄 database.py               # SQLAlchemy connection to PostgreSQL
+│   │
+│   └── 📁 utils/                        # ← Shared utilities
+│       ├── 📄 haversine.py              # Distance calculation
+│       ├── 📄 config.py                 # Environment variables (DB credentials)
+│       └── 📄 logger.py                 # Logging setup
+│
+├── 📁 frontend/                         # ← Next.js app (Container 5)
+│   ├── 📄 Dockerfile
+│   ├── 📄 package.json
+│   │
+│   ├── 📁 app/                          # Next.js 13+ app directory
+│   │   ├── 📄 page.tsx                  # Homepage (3D globe)
+│   │   └── 📄 layout.tsx                # Root layout
+│   │
+│   ├── 📁 components/
+│   │   ├── 📄 ShipGlobe.tsx             # Mapbox 3D globe component
+│   │   ├── 📄 ShipCard.tsx              # Ship info popup
+│   │   ├── 📄 Dashboard.tsx             # Stats dashboard
+│   │   └── 📄 TrajectoryLine.tsx        # Ship historical path
+│   │
+│   └── 📁 lib/
+│       └── 📄 api.ts                    # Fetch functions (calls backend API)
+│
+├── 📁 database/                         # ← Database setup (Container 2)
+│   ├── 📄 init.sql                      # SQL schema (creates tables on first run)
+│   └── 📄 docker-compose.yml            # PostgreSQL container config
+│
+├── 📁 nginx/                            # ← Reverse proxy config
+│   └── 📄 nginx.conf                    # Routes / → frontend, /api → backend
+│
+├── 📄 docker-compose.yml                # Orchestrates all 5 containers
+├── 📄 .env                              # Environment variables (DB password, API keys)
+└── 📄 README.md                         # Setup instructions
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🔍 WHAT CODE RUNS WHERE & WHEN:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CONTAINER 1: SCRAPER (backend/scraper/)                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ WHEN:     Every 1 hour (via APScheduler)                                    │
+│ DOES:     Scrapes MarineTraffic → Saves to PostgreSQL                       │
+│ FILES:    scraper.py, scheduler.py, db_writer.py                            │
+│ ENTRY:    python scheduler.py (runs forever, triggers scraper hourly)       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CONTAINER 2: DATABASE (PostgreSQL)                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ WHEN:     Always running                                                    │
+│ DOES:     Stores all data (scraped ships, ML predictions, ports)            │
+│ FILES:    init.sql (creates tables on first run)                            │
+│ ENTRY:    docker run postgres:15 (managed by Docker)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CONTAINER 3: ML PIPELINE (backend/ml/)                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ WHEN:     Every day at 12:00 AM (via APScheduler)                           │
+│ DOES:     Reads DB → Runs ML → Saves predictions back to DB                 │
+│ FILES:    ml_scheduler.py, port_clustering.py, anomaly_detection.py,        │
+│           trajectory_prediction.py, feature_engineering.py                   │
+│ ENTRY:    python ml_scheduler.py (runs forever, triggers ML daily)          │
+│ FLOW:     1. Feature engineering (calculate COURSE_STD, etc.)               │
+│           2. Port clustering (DBSCAN)                                        │
+│           3. Anomaly detection (Isolation Forest)                            │
+│           4. Trajectory prediction (LSTM)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CONTAINER 4: API SERVER (backend/api/)                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ WHEN:     Always running (listens for HTTP requests)                        │
+│ DOES:     Receives requests from frontend → Queries DB → Returns JSON       │
+│ FILES:    main.py, routes.py, models.py, database.py                        │
+│ ENTRY:    uvicorn main:app --host 0.0.0.0 --port 8000                       │
+│ ENDPOINTS:                                                                   │
+│   GET /api/ships/current          → Returns all 10k ships right now         │
+│   GET /api/ships/:id/history      → Returns 30-day trajectory of one ship   │
+│   GET /api/ports                  → Returns discovered ports                │
+│   GET /api/anomalies              → Returns flagged ships                   │
+│   GET /api/predictions/:id        → Returns predicted route for one ship    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CONTAINER 5: FRONTEND (frontend/)                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ WHEN:     Always running (serves website)                                   │
+│ DOES:     Displays 3D globe → Fetches data from API → Renders UI            │
+│ FILES:    All .tsx files in frontend/                                       │
+│ ENTRY:    npm run dev (development) or npm run build + npm start (prod)     │
+│ FLOW:     User opens browser → Next.js loads → Calls /api/ships/current →   │
+│           Displays ships on Mapbox globe                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ NGINX REVERSE PROXY (nginx/)                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ WHEN:     Always running                                                    │
+│ DOES:     Routes incoming traffic to correct container                      │
+│ ROUTES:   https://maritimeintel.me/        → Container 5 (Frontend)         │
+│           https://maritimeintel.me/api/... → Container 4 (API)              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 DEPLOYMENT CHECKLIST:
+
+1. SSH into DigitalOcean Droplet
+2. Clone your repo: git clone https://github.com/you/maritime-intelligence
+3. Create .env file (DB password, Mapbox token)
+4. Run: docker-compose up -d
+5. Containers start automatically:
+   - PostgreSQL creates tables (from init.sql)
+   - Scraper starts scraping every hour
+   - API server starts listening on port 8000
+   - ML pipeline waits until midnight to run
+   - Frontend builds and starts on port 3000
+   - Nginx routes traffic from port 80
+
+Done! Visit your-droplet-ip:80 in browser.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+⏱️ TIMELINE OF WHAT RUNS WHEN:
+
+12:00 AM (Midnight)
+  └─ ML Pipeline runs (takes ~20 minutes)
+     1. Feature engineering (5 min)
+     2. Port clustering (2 min)
+     3. Anomaly detection (3 min)
+     4. Trajectory prediction (10 min)
+     └─ Results saved to DB
+
+Every hour (1 AM, 2 AM, 3 AM...)
+  └─ Scraper runs (takes ~2 minutes)
+     1. Scrapes MarineTraffic
+     2. Parses 10k ships
+     3. Saves to ships_current, ships_historical
+     └─ DB updated
+
+All day (24/7)
+  └─ API Server + Frontend running
+     - User visits website
+     - Frontend calls /api/ships/current
+     - API queries DB
+     - Returns JSON
+     - Frontend displays on globe
+
+
+sequenceDiagram
+    participant MT as MarineTraffic.com
+    participant SC as Scraper (scheduler.py)
+    participant DB as PostgreSQL
+    participant ML as ML Pipeline (ml_scheduler.py)
+    participant API as FastAPI (main.py)
+    participant FE as Frontend (Next.js)
+    participant User as User Browser
+
+    Note over SC,ML: ═══ HOURLY SCRAPE ═══
+    
+    SC->>SC: APScheduler triggers<br/>(every 1 hour)
+    SC->>MT: HTTP GET /getData/get_data_json_4
+    MT-->>SC: JSON (10,000 ships)
+    SC->>SC: Parse JSON into DataFrame
+    SC->>DB: INSERT INTO ships_current
+    SC->>DB: INSERT INTO ships_historical
+    DB-->>SC: ✓ Data saved
+    
+    Note over ML,API: ═══ DAILY ML PIPELINE (Midnight) ═══
+    
+    ML->>ML: APScheduler triggers<br/>(12:00 AM daily)
+    ML->>DB: SELECT * FROM ships_historical<br/>WHERE timestamp > NOW() - 7 days
+    DB-->>ML: 168 hours of data per ship
+    
+    ML->>ML: feature_engineering.py<br/>Calculate COURSE_STD, HC_DIFF, etc.
+    
+    ML->>ML: port_clustering.py (DBSCAN)<br/>Find ships with SPEED < 2
+    ML->>DB: INSERT INTO ports_discovered
+    
+    ML->>ML: anomaly_detection.py<br/>(Isolation Forest)
+    ML->>DB: INSERT INTO anomalies
+    
+    ML->>ML: trajectory_prediction.py<br/>(LSTM)
+    ML->>DB: INSERT INTO predictions
+    
+    DB-->>ML: ✓ ML results saved
+    
+    Note over User,FE: ═══ USER VISITS WEBSITE ═══
+    
+    User->>FE: Opens https://maritimeintel.me
+    FE->>FE: Next.js loads page.tsx
+    
+    FE->>API: GET /api/ships/current
+    API->>DB: SELECT * FROM ships_current
+    DB-->>API: 10,000 ships
+    API-->>FE: JSON response
+    FE->>FE: Mapbox renders ships on globe
+    
+    User->>FE: Clicks ship #12345
+    FE->>API: GET /api/ships/12345/history
+    API->>DB: SELECT * FROM ships_historical<br/>WHERE ship_id = 12345
+    DB-->>API: 30 days of positions
+    API-->>FE: JSON response
+    FE->>FE: Draw trajectory line on map
+    
+    FE->>API: GET /api/predictions/12345
+    API->>DB: SELECT * FROM predictions<br/>WHERE ship_id = 12345
+    DB-->>API: Predicted route (next 6 hours)
+    API-->>FE: JSON response
+    FE->>FE: Draw dotted prediction line
+    
+    FE->>API: GET /api/ports
+    API->>DB: SELECT * FROM ports_discovered
+    DB-->>API: ~100 port locations
+    API-->>FE: JSON response
+    FE->>FE: Draw port circles on map
+    
+    FE->>API: GET /api/anomalies
+    API->>DB: SELECT * FROM anomalies
+    DB-->>API: Flagged ships
+    API-->>FE: JSON response
+    FE->>FE: Mark anomalous ships in red
+    
+    FE-->>User: Complete dashboard displayed!
+
+graph LR
+    subgraph Internet
+        USER[👤 User<br/>Browser]
+        MT[🌐 MarineTraffic]
+    end
+
+    subgraph DigitalOcean["☁️ DigitalOcean Droplet (your-ip-address)"]
+        
+        NGINX["🔀 Nginx<br/>Port 80/443<br/>---<br/>Reverse Proxy"]
+        
+        subgraph Docker Network
+            SC["📡 Scraper<br/>No exposed port<br/>---<br/>Runs: scheduler.py"]
+            
+            DB["🗄️ PostgreSQL<br/>Port 5432<br/>---<br/>Database"]
+            
+            ML["🤖 ML Pipeline<br/>No exposed port<br/>---<br/>Runs: ml_scheduler.py"]
+            
+            API["⚡ FastAPI<br/>Port 8000<br/>---<br/>REST API"]
+            
+            FE["🎨 Frontend<br/>Port 3000<br/>---<br/>Next.js"]
+        end
+    end
+
+    %% External connections
+    MT -->|"GET /getData<br/>(every hour)"| SC
+    USER -->|"HTTPS<br/>maritimeintel.me"| NGINX
+    
+    %% Internal connections
+    NGINX -->|"/ → proxy_pass"| FE
+    NGINX -->|"/api → proxy_pass"| API
+    
+    SC -->|"SQL INSERT<br/>(every hour)"| DB
+    ML -->|"SQL SELECT/INSERT<br/>(daily midnight)"| DB
+    API -->|"SQL SELECT<br/>(on request)"| DB
+    FE -->|"HTTP GET /api/*"| API
+
+    %% Styling
+    classDef external fill:#e9ecef,stroke:#495057
+    classDef proxy fill:#ffd43b,stroke:#f08c00,color:#000
+    classDef container fill:#4dabf7,stroke:#1971c2,color:#fff
+    
+    class USER,MT external
+    class NGINX proxy
+    class SC,DB,ML,API,FE container
+
+🎯 KEY TAKEAWAYS (Connecting the Pieces)
+1. Physical Location - Everything runs on ONE DigitalOcean Droplet
+Your Droplet IP: 123.45.67.89
+├── 5 Docker containers running simultaneously
+├── Nginx routing traffic from port 80
+└── All containers talk to each other via Docker network
+```
+
+### **2. Code Organization - Two Main Folders**
+```
+backend/   ← All Python code (scraper + ML + API)
+frontend/  ← All Next.js code (you already know this)
+3. Three Python "Programs" Running Independently
+Program 1: Scraper (runs every hour)
+bashpython backend/scraper/scheduler.py  # Runs forever, triggers scraper.py hourly
+Program 2: ML Pipeline (runs daily at midnight)
+bashpython backend/ml/ml_scheduler.py  # Runs forever, triggers ML scripts daily
+Program 3: API Server (runs 24/7, handles requests)
+bashuvicorn backend/api/main:app  # Runs forever, listens on port 8000
+```
+
+### **4. How They Connect**
+```
+Scraper → PostgreSQL ← ML Pipeline
+                ↓
+            API Server ← Frontend ← User
+All communication happens through PostgreSQL:
+
+Scraper writes new ship data
+ML reads that data, runs algorithms, writes predictions
+API reads everything and serves it as JSON
+Frontend fetches JSON and displays it
+
+5. No Direct Communication Between Containers
+❌ Scraper does NOT call ML Pipeline
+❌ ML Pipeline does NOT call API
+❌ API does NOT call Scraper
+✅ They all just read/write to the shared database
+✅ They run on their own schedules independently
+✅ Database is the "source of truth"
+6. Why This Architecture Works
+
+Decoupled - If scraper crashes, API still works (serves old data)
+Scalable - Can move ML to separate server if it gets slow
+Simple - Each container has ONE job
+Debuggable - Check logs for each container separately
+
+
+in a fashion wehre I can just do something like create a keep notes task list that i can do in sprints wehre theres a clear end point etc, I wnat you to give me a breakdown of this idea in 7 sprints. I'm going to first create the entire thing (i already have the scraping script and the analysis, i wanna start building everything else) 

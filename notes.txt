@@ -88,9 +88,6 @@ both of which do not need rotation, therefore we can replace ALL NaN values with
 
 a simple linear regression can fit the width to length plot 
 
-some width values were 0 for some reason.
-TODO: find the reason why some width values were 0, they should've been NaN atleast? 
-
 key thing I'm doing is AI had given TYPE_NAME against the width but all entries that have TYPE_NAME don't have width... 
 Instead I'm using SHIPTYPE since it's ACTUALLY the same thing as we saw previously, therefore using the correlation between
 TYPE_IMG and TYPE_NAME given to us, and TYPE_IMG == SHIPTYPE, and SHIPTYPE having more coverage, we've converted SHIPTYPE
@@ -133,7 +130,9 @@ better to use domain-specific rules like "moving but anchored" or "stationary bu
 those are ACTUAL operational anomalies, not just statistical outliers
 
 
----
+we will go ahead with using simple linear regression for predicting what the width of a ship might be based on its length
+
+------
 
 Okay, from the goals we had decided, we did the visualization part of density and heatmap
 for ML, classification according to movement patterns is POSSIBLE, if we collectively use all other features wisely 
@@ -183,7 +182,7 @@ In total we would be playing with around 10 million entries of data when this is
 
 I will actually just paste the entire AI's response for my question asking a list of all the concepts that I need to learn in order to understand everything to be able to implement the entire project. Now, conceptually I WILL try to understand every single thing but to ship in a week I would still be using abstract libraries that would do the code for me. I hope for a XGBoost algorithm to just be imported from some library sklearn or something and I do XGBoost.train(data) and tune hyperparameters with my understanding. That is enough I think. 
 
-# ALGORITHMS
+# ALGORITHMS    
 DBSCAN 
 K-Means Clustering
 HDBSCAN
